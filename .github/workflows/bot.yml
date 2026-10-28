@@ -2,13 +2,21 @@ name: Olymp Sniper Bot 24/7
 
 on:
   schedule:
-    # Corre automáticamente cada 5 minutos en los servidores de GitHub
+    # Corre automáticamente cada 5 minutos en bucle perpetuo
     - cron: '*/5 * * * *'
-  workflow_dispatch: # Permite iniciarlo manualmente con un botón
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: sniper-bot
+  cancel-in-progress: false
 
 jobs:
   run-sniper:
     runs-on: ubuntu-latest
+    timeout-minutes: 350 # Corre hasta ~6 horas seguidas por sesión
     steps:
       - name: Descargar Código
         uses: actions/checkout@v4
@@ -22,6 +30,6 @@ jobs:
         run: |
           pip install -r requirements.txt || (cd olymp_sniper_bot && pip install -r requirements.txt)
 
-      - name: Ejecutar Scanner Sniper
+      - name: Ejecutar Scanner Sniper 24/7
         run: |
           python multi_scanner.py || (cd olymp_sniper_bot && python multi_scanner.py)
