@@ -4,11 +4,12 @@ Motor Matemático y Lógica Sniper:
 - Cálculo de EMAs (35 y 100) y su pendiente
 - Detección de zonas Golden Zone (0.5 y 0.618)
 - Filtro Anticascada (mínimo de rechazo o no operar contra 3+ velas continuas)
+- Filtro de Agotamiento de RSI 7 (Paso 6 del Manual Maestro)
 """
 from typing import List, Dict, Optional, Tuple
 
 class SniperStrategy:
-    def __init__(self, fibo_tolerance_pct: float = 0.0008):
+    def __init__(self, fibo_tolerance_pct: float = 0.0010):
         self.fibo_tolerance_pct = fibo_tolerance_pct
 
     def calculate_fibonacci(self, swing_high: float, swing_low: float, trend: str) -> Dict[str, float]:
@@ -18,6 +19,9 @@ class SniperStrategy:
         trend: 'UP' (impulso alcista: 1 abajo en el Low, 0 arriba en el High)
         """
         diff = swing_high - swing_low
+        if diff <= 0:
+            diff = 0.0001
+
         if trend.upper() == "DOWN":
             return {
                 "1.0": swing_high,
@@ -48,8 +52,12 @@ class SniperStrategy:
         swing_low: float
     ) -> Optional[Tuple[str, str, float]]:
         """
-        Evalúa si se cumplen el 100% de las condiciones Sniper.
-        Retorna: (Tipo_Senal, Nivel_Clave, Precio_Referencia) o None
+        Evalúa si se cumplen el 100% de las condiciones Sniper del Manual Maestro:
+        1. Tendencia clara por posición de EMA 35 y EMA 100
+        2. Canal abierto (sin cruces ni consolidación plana)
+        3. Toque en Golden Zone de Fibo (0.5 / 0.618) o rebote en EMA 35
+        4. RSI 7 confirmando descanso / agotamiento
+        5. Filtro anticascada (rechazo con mecha)
         """
         # 1. Determinación de la Tendencia por EMAs
         is_downtrend = ema_35 < ema_100
@@ -57,7 +65,7 @@ class SniperStrategy:
         
         # 2. Filtro de Pendiente (distancia mínima de separación entre EMAs)
         ema_gap = abs(ema_35 - ema_100) / current_price
-        if ema_gap < 0.0001:
+        if ema_gap < 0.00008:
             # EMAs pegadas o planas -> Lateralización -> NO OPERAR
             return None
 
@@ -75,8 +83,12 @@ class SniperStrategy:
 
         # CASO 1: VENTA (Tendencia Bajista)
         if is_downtrend:
-            # El precio debe haber subido a retroceder (Pullback)
-            # Zonas sniper: Fibo 0.5, Fibo 0.618 o toque directo a la EMA 35
+            # REGLA SAGRADA RSI 7 (Manual Maestro):
+            # En venta el precio debe haber hecho un pullback alcista (RSI >= 48).
+            # Si el RSI está por debajo de 48, el mercado ya está sobrevendido en el suelo: PROHIBIDO VENDER.
+            if rsi_7 < 48:
+                return None
+
             golden_50 = fibo["0.5"]
             golden_618 = fibo["0.618"]
             
@@ -94,13 +106,19 @@ class SniperStrategy:
                     wick_top = current_candle['high'] - max(current_candle['open'], current_candle['close'])
                     body = abs(current_candle['close'] - current_candle['open'])
                     if wick_top < (body * 0.3):
-                        return None # Cascado alcista sin freno
+                        return None # Cascada alcista sin freno
 
                 level_desc = "EMA 35" if at_ema35 else ("Fibo 0.618" if at_618 else "Fibo 0.5")
                 return ("VENTA", level_desc, current_price)
 
         # CASO 2: COMPRA (Tendencia Alcista)
         elif is_uptrend:
+            # REGLA SAGRADA RSI 7 (Manual Maestro):
+            # En compra el precio debe haber hecho un retroceso bajista (RSI <= 52).
+            # Si el RSI está por encima de 52, el mercado ya está sobrecomprado en el techo: PROHIBIDO COMPRAR.
+            if rsi_7 > 52:
+                return None
+
             golden_50 = fibo["0.5"]
             golden_618 = fibo["0.618"]
             

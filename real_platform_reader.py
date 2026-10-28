@@ -26,6 +26,23 @@ def calculate_ema(prices: List[float], period: int) -> float:
         ema = (p - ema) * multiplier + ema
     return ema
 
+def calculate_rsi(prices: List[float], period: int = 7) -> float:
+    """Calcula el RSI de periodo 7 según la fórmula estándar de Wilder (Manual Maestro)."""
+    if len(prices) < period + 1:
+        return 50.0
+    deltas = [prices[i] - prices[i-1] for i in range(1, len(prices))]
+    gains = [d if d > 0 else 0.0 for d in deltas]
+    losses = [-d if d < 0 else 0.0 for d in deltas]
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    for i in range(period, len(deltas)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1.0 + rs))
+
 class RealOlympPlatformReader:
     def __init__(self):
         self.strategy = SniperStrategy(fibo_tolerance_pct=0.0010)
@@ -122,13 +139,14 @@ class RealOlympPlatformReader:
                                 swing_low = min(recent_prices)
                                 ema_35 = calculate_ema(self.price_ticks, 35)
                                 ema_100 = calculate_ema(self.price_ticks, 100)
+                                rsi_7 = calculate_rsi(self.price_ticks, 7)
                                 
                                 result = self.strategy.evaluate_setup(
                                     current_price=current_price,
                                     candles=self.candles,
                                     ema_35=ema_35,
                                     ema_100=ema_100,
-                                    rsi_7=50.0,
+                                    rsi_7=rsi_7,
                                     swing_high=swing_high,
                                     swing_low=swing_low
                                 )
