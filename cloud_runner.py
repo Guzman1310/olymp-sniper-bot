@@ -86,7 +86,14 @@ class OriginalTimingScanner:
         now = datetime.datetime.now()
         current_minute = now.minute
 
-        for market, info in MARKET_SCHEDULE.items():
+        # Rotar o barajar para evaluar los 22 mercados con la misma prioridad
+        market_list = list(MARKET_SCHEDULE.items())
+        # Rotar la lista segun el minuto actual para que todos los activos tengan oportunidad igual
+        shift = (now.minute + now.hour * 60) % len(market_list)
+        rotated_markets = market_list[shift:] + market_list[:shift]
+
+        alerts_sent_this_minute = 0
+        for market, info in rotated_markets:
             if not self.is_market_open(market):
                 continue
 
@@ -111,8 +118,10 @@ class OriginalTimingScanner:
                 sig_type, level_name, ref_price = setup
                 trigger_sniper_signal(sig_type, market, ref_price, level_name, payout=data["payout"])
                 self.last_alerts[market] = current_minute
-                print(f"[ALERTA ORIGINAL ENVIADA]: {sig_type} en {market} ({ref_price:.2f}) al segundo :50")
-                break
+                alerts_sent_this_minute += 1
+                print(f"[ALERTA ENVIADA]: {sig_type} en {market} ({ref_price:.2f}) al segundo :50")
+                if alerts_sent_this_minute >= 1: # Maximo 1 senal por minuto para operar con enfoque
+                    break
 
     def run_loop(self):
         print("="*65)
