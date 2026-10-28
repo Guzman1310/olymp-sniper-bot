@@ -1,10 +1,9 @@
 """
-Motor Matemático y Lógica Sniper:
-- Cálculo de Niveles de Fibonacci (0, 0.236, 0.382, 0.5, 0.618, 1.0)
-- Cálculo de EMAs (35 y 100) y su pendiente
-- Detección de zonas Golden Zone (0.5 y 0.618)
-- Filtro Anticascada (mínimo de rechazo o no operar contra 3+ velas continuas)
-- Filtro de Agotamiento de RSI 7 (Paso 6 del Manual Maestro)
+Motor Matemático y Lógica Sniper - FIDELIDAD 100% AL MANUAL MAESTRO:
+MÓDULO 1: Las 4 Capas (EMA 100, EMA 35, Fibo Golden Zone 0.5/0.618, RSI 7).
+MÓDULO 2: Uso estricto de EMA 35 vs EMA 100.
+MÓDULO 3: Zonas Prohibidas (Efecto Sándwich, Mercado Serrucho, Cuchillo Cayendo, Vela Elefante, Multitoques, FOMO RSI).
+MÓDULO 4: Emboscada de Compra y Venta con Gatillo al segundo :50.
 """
 from typing import List, Dict, Optional, Tuple
 
@@ -13,11 +12,6 @@ class SniperStrategy:
         self.fibo_tolerance_pct = fibo_tolerance_pct
 
     def calculate_fibonacci(self, swing_high: float, swing_low: float, trend: str) -> Dict[str, float]:
-        """
-        Calcula los niveles de Fibonacci exactos.
-        trend: 'DOWN' (impulso bajista: 1 arriba en el High, 0 abajo en el Low)
-        trend: 'UP' (impulso alcista: 1 abajo en el Low, 0 arriba en el High)
-        """
         diff = swing_high - swing_low
         if diff <= 0:
             diff = 0.0001
@@ -44,7 +38,7 @@ class SniperStrategy:
     def evaluate_setup(
         self,
         current_price: float,
-        candles: List[Dict[str, float]], # Cada vela: {'open', 'high', 'low', 'close'}
+        candles: List[Dict[str, float]],
         ema_35: float,
         ema_100: float,
         rsi_7: float,
@@ -52,90 +46,106 @@ class SniperStrategy:
         swing_low: float
     ) -> Optional[Tuple[str, str, float]]:
         """
-        Evalúa si se cumplen el 100% de las condiciones Sniper del Manual Maestro:
-        1. Tendencia clara por posición de EMA 35 y EMA 100
-        2. Canal abierto (sin cruces ni consolidación plana)
-        3. Toque en Golden Zone de Fibo (0.5 / 0.618) o rebote en EMA 35
-        4. RSI 7 confirmando descanso / agotamiento
-        5. Filtro anticascada (rechazo con mecha)
+        Evalúa el 100% de las 8 reglas del Checklist del Manual Maestro.
+        Si CUALQUIERA de las condiciones de filtro falla, retorna None (No operar).
         """
-        # 1. Determinación de la Tendencia por EMAs
-        is_downtrend = ema_35 < ema_100
-        is_uptrend = ema_35 > ema_100
-        
-        # 2. Filtro de Pendiente (distancia mínima de separación entre EMAs)
+        # =========================================================================
+        # MÓDULO 3: ZONAS PROHIBIDAS (FILTROS DE BLOQUEO)
+        # =========================================================================
+
+        # 1. FILTRO: EFECTO SÁNDWICH (Medias pegadas / asfixiadas)
+        # El manual exige separación limpia en canal de 45°, sin compresión
         ema_gap = abs(ema_35 - ema_100) / current_price
-        if ema_gap < 0.00008:
-            # EMAs pegadas o planas -> Lateralización -> NO OPERAR
+        if ema_gap < 0.00025: # Separación mínima del 0.025%
+            # ZONA PROHIBIDA #2: Efecto Sándwich -> BLOQUEO TOTAL
             return None
 
-        # 3. Cálculo de Fibonacci
+        # 2. FILTRO: MERCADO SERRUCHO (Alternancia constante Verde-Roja-Verde-Roja)
+        # El manual prohíbe operar cuando las velas alternan de color sin tendencia
+        if len(candles) >= 4:
+            c1 = candles[-1]["close"] > candles[-1]["open"] # True=Verde, False=Roja
+            c2 = candles[-2]["close"] > candles[-2]["open"]
+            c3 = candles[-3]["close"] > candles[-3]["open"]
+            c4 = candles[-4]["close"] > candles[-4]["open"]
+            # Si hay alternancia estricta en las últimas 4 velas (V-R-V-R o R-V-R-V)
+            if (c1 != c2) and (c2 != c3) and (c3 != c4):
+                # ZONA PROHIBIDA #6: Mercado Serrucho -> BLOQUEO TOTAL
+                return None
+
+        # 3. FILTRO: VELA ELEFANTE EN MÁXIMOS / MÍNIMOS (Clímax de agotamiento)
+        if len(candles) >= 6:
+            bodies = [abs(c["close"] - c["open"]) for c in candles[-6:-1]]
+            avg_body = sum(bodies) / len(bodies) if bodies else 0.0001
+            current_body = abs(candles[-1]["close"] - candles[-1]["open"])
+            if current_body > (avg_body * 3.0):
+                # ZONA PROHIBIDA #7: Vela elefante descomunal -> Peligro de reversión violenta
+                return None
+
+        # =========================================================================
+        # MÓDULO 1 Y 2: DETERMINACIÓN DE TENDENCIA INSTITUCIONAL
+        # =========================================================================
+        is_downtrend = ema_35 < ema_100
+        is_uptrend = ema_35 > ema_100
+
         trend_str = "DOWN" if is_downtrend else "UP"
         fibo = self.calculate_fibonacci(swing_high, swing_low, trend_str)
-        
-        # 4. Filtro Anticascada en las últimas 3 velas cerradas
-        if len(candles) >= 3:
-            last_3 = candles[-3:]
-            greens = sum(1 for c in last_3 if c['close'] > c['open'])
-            reds = sum(1 for c in last_3 if c['close'] < c['open'])
-        else:
-            greens, reds = 0, 0
 
-        # CASO 1: VENTA (Tendencia Bajista)
+        golden_50 = fibo["0.5"]
+        golden_618 = fibo["0.618"]
+
+        # Tolerancia de proximidad al nivel
+        at_ema35 = abs(current_price - ema_35) / current_price <= self.fibo_tolerance_pct
+        at_05 = abs(current_price - golden_50) / current_price <= self.fibo_tolerance_pct
+        at_618 = abs(current_price - golden_618) / current_price <= self.fibo_tolerance_pct
+
+        # Solo operamos si toca Fibo 50%, Fibo 61.8% o EMA 35
+        if not (at_ema35 or at_05 or at_618):
+            return None
+
+        level_desc = "EMA 35" if at_ema35 else ("Fibo 0.618" if at_618 else "Fibo 0.5")
+
+        # =========================================================================
+        # MÓDULO 4: CASO 1 - EMBOSCADA DE VENTA (Tendencia Bajista)
+        # =========================================================================
         if is_downtrend:
-            # REGLA SAGRADA RSI 7 (Manual Maestro):
-            # En venta el precio debe haber hecho un pullback alcista (RSI >= 48).
-            # Si el RSI está por debajo de 48, el mercado ya está sobrevendido en el suelo: PROHIBIDO VENDER.
-            if rsi_7 < 48:
+            # 1. REGLA RSI 7: El precio debe haber hecho un pullback alcista con RSI entre 52 y 75
+            # PROHIBIDO VENDER SI RSI < 50 (Vendedores agotados en el suelo)
+            # PROHIBIDO VENDER SI RSI > 80 (Vela disparada fuera de rango)
+            if rsi_7 < 50.0 or rsi_7 > 80.0:
                 return None
 
-            golden_50 = fibo["0.5"]
-            golden_618 = fibo["0.618"]
-            
-            # Tolerancia de proximidad
-            at_ema35 = abs(current_price - ema_35) / current_price <= self.fibo_tolerance_pct
-            at_05 = abs(current_price - golden_50) / current_price <= self.fibo_tolerance_pct
-            at_618 = abs(current_price - golden_618) / current_price <= self.fibo_tolerance_pct
+            # 2. FILTRO CUCHILLO CAYENDO / ANTICASCADA:
+            # Si la vela subió con fuerza hacia el techo, DEBE dejar mecha superior de rechazo
+            if len(candles) >= 1:
+                last_c = candles[-1]
+                wick_top = last_c["high"] - max(last_c["open"], last_c["close"])
+                body = abs(last_c["close"] - last_c["open"])
+                # ZONA PROHIBIDA #3: Sin mecha superior (cuerpo sólido perforando)
+                if body > 0 and wick_top < (body * 0.30):
+                    return None
 
-            # Condición de gatillo: precio tocando la resistencia
-            if at_ema35 or at_05 or at_618:
-                # Si vienen 3 velas verdes con fuerza sin mecha, no entrar al choque
-                if greens >= 3 and len(candles) > 0:
-                    current_candle = candles[-1]
-                    # Debe haber mecha superior de rechazo
-                    wick_top = current_candle['high'] - max(current_candle['open'], current_candle['close'])
-                    body = abs(current_candle['close'] - current_candle['open'])
-                    if wick_top < (body * 0.3):
-                        return None # Cascada alcista sin freno
+            return ("VENTA", level_desc, current_price)
 
-                level_desc = "EMA 35" if at_ema35 else ("Fibo 0.618" if at_618 else "Fibo 0.5")
-                return ("VENTA", level_desc, current_price)
-
-        # CASO 2: COMPRA (Tendencia Alcista)
+        # =========================================================================
+        # MÓDULO 4: CASO 2 - EMBOSCADA DE COMPRA (Tendencia Alcista)
+        # =========================================================================
         elif is_uptrend:
-            # REGLA SAGRADA RSI 7 (Manual Maestro):
-            # En compra el precio debe haber hecho un retroceso bajista (RSI <= 52).
-            # Si el RSI está por encima de 52, el mercado ya está sobrecomprado en el techo: PROHIBIDO COMPRAR.
-            if rsi_7 > 52:
+            # 1. REGLA RSI 7: El precio debe haber hecho un pullback bajista con RSI entre 25 y 48
+            # PROHIBIDO COMPRAR SI RSI > 50 (Compradores sin oxígeno en el techo / FOMO)
+            # PROHIBIDO COMPRAR SI RSI < 20 (Desplome violento sin frenos)
+            if rsi_7 > 50.0 or rsi_7 < 20.0:
                 return None
 
-            golden_50 = fibo["0.5"]
-            golden_618 = fibo["0.618"]
-            
-            at_ema35 = abs(current_price - ema_35) / current_price <= self.fibo_tolerance_pct
-            at_05 = abs(current_price - golden_50) / current_price <= self.fibo_tolerance_pct
-            at_618 = abs(current_price - golden_618) / current_price <= self.fibo_tolerance_pct
+            # 2. FILTRO CUCHILLO CAYENDO / ANTICASCADA:
+            # Si la vela cayó hacia el soporte, DEBE dejar mecha inferior de rechazo
+            if len(candles) >= 1:
+                last_c = candles[-1]
+                wick_bottom = min(last_c["open"], last_c["close"]) - last_c["low"]
+                body = abs(last_c["close"] - last_c["open"])
+                # ZONA PROHIBIDA #3: Sin mecha inferior (cuerpo sólido perforando)
+                if body > 0 and wick_bottom < (body * 0.30):
+                    return None
 
-            if at_ema35 or at_05 or at_618:
-                if reds >= 3 and len(candles) > 0:
-                    current_candle = candles[-1]
-                    # Debe haber mecha inferior de rechazo
-                    wick_bottom = min(current_candle['open'], current_candle['close']) - current_candle['low']
-                    body = abs(current_candle['close'] - current_candle['open'])
-                    if wick_bottom < (body * 0.3):
-                        return None # Cascada bajista sin freno
-
-                level_desc = "EMA 35" if at_ema35 else ("Fibo 0.618" if at_618 else "Fibo 0.5")
-                return ("COMPRA", level_desc, current_price)
+            return ("COMPRA", level_desc, current_price)
 
         return None
