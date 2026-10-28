@@ -1,0 +1,6 @@
+# Entorno virtual y temporales
+__pycache__/
+*.pyc
+.env
+.user_uploaded/
+scratch/
