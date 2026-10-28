@@ -1,6 +1,6 @@
 """
 Lector y Escáner Real de Olymp Trade (Full Auto-Detection & 1M Candle Math).
-- Auto-detecta el activo y el precio en pantalla mediante múltiples métodos (Título, DOM, Botones, Red).
+- Excluye estrictamente saldos, balances y cabeceras para leer SOLO el precio del gráfico.
 - Calcula EMA 35, EMA 100, RSI 7 y Fibo de mecha a mecha sobre VELAS DE 1 MINUTO.
 - Registra cada paso en sniper_activity.log para auditoría en tiempo real.
 """
@@ -10,7 +10,6 @@ import os
 import sys
 import json
 import msvcrt
-import requests
 from typing import List, Dict, Optional
 from playwright.sync_api import sync_playwright
 from strategy import SniperStrategy
@@ -70,7 +69,7 @@ def calculate_rsi_candles(closes: List[float], period: int = 7) -> float:
 
 class RobustOlympReader:
     def __init__(self):
-        self.strategy = SniperStrategy(fibo_tolerance_pct=0.0012)
+        self.strategy = SniperStrategy(fibo_tolerance_pct=0.0010)
         self.last_alert_minute = -1
         self.candles: List[Dict[str, float]] = []
         self.current_candle: Optional[Dict[str, float]] = None
@@ -106,8 +105,8 @@ class RobustOlympReader:
 
     def start(self):
         log_msg("="*65)
-        log_msg("🎯 LECTOR SNIPER ROBUSTO 100% REAL TIME (OLYMP TRADE)")
-        log_msg("   Calcula EMA 35, EMA 100, RSI 7 y Fibo de 1 Minuto")
+        log_msg("🎯 LECTOR SNIPER 100% MANUAL MAESTRO (LOCAL - SIN FANTASMAS)")
+        log_msg("   Calcula EMA 35, EMA 100, RSI 7 y Fibo sobre Velas de 1M")
         log_msg("   Equipo: Rafael Guzmán & Eduardo Rivera")
         log_msg("="*65)
 
@@ -144,37 +143,41 @@ class RobustOlympReader:
                 try:
                     now = datetime.datetime.now()
 
-                    # Extractor Universal JavaScript (Título + DOM + Botones)
+                    # Extractor Ultra-Preciso: EXCLUYE SALDOS/HEADERS Y LEE EL GRÁFICO REAL
                     info = page.evaluate("""() => {
                         let info = { price: 0, asset: '', title: document.title, payout: 85 };
                         
-                        // 1. Título de la página (ej: "5,914.50 Europe Composite Index")
-                        let tm = document.title.match(/([0-9]{1,3}(?:,[0-9]{3})*(?:\\.[0-9]+)?|[0-9]+\\.[0-9]+)/);
-                        if (tm) info.price = parseFloat(tm[1].replace(/,/g, ''));
-                        
-                        // 2. Extraer nombre de activo
-                        let assetEl = document.querySelector('[data-test*="asset"], [class*="asset-name"], [class*="asset-select"]');
+                        // 1. Extraer nombre de activo del selector de activos
+                        let assetEl = document.querySelector('[data-test*="asset"], [class*="asset-name"], [class*="asset-select"], [class*="pair-name"]');
                         if (assetEl) {
                             info.asset = assetEl.innerText.trim();
                         }
                         
-                        // 3. Extraer precio del DOM si el título no lo tenía
-                        if (!info.price) {
-                            let priceEl = document.querySelector('.price-value, [data-test="current-price"], [class*="deal-button_price"], [class*="asset-quote"]');
-                            if (priceEl) {
-                                let m = priceEl.innerText.match(/([0-9]+(?:\\.[0-9]+)?)/);
-                                if (m) info.price = parseFloat(m[1]);
+                        // 2. Extraer precio del gráfico / panel de trading (IGNORAR SALDO / BALANCE / HEADER)
+                        let tradingContainer = document.querySelector('main, [class*="trading-area"], [class*="chart"], [class*="deal-form"]');
+                        let searchRoot = tradingContainer || document.body;
+
+                        // Buscar elementos específicos del precio de mercado
+                        let candidateEls = searchRoot.querySelectorAll('[class*="deal-button_price"], [class*="strike"], [class*="current-price"], [class*="quote-val"], [data-test*="strike"]');
+                        for (let el of candidateEls) {
+                            let text = el.innerText.replace(/,/g, '').replace('$', '').trim();
+                            let val = parseFloat(text);
+                            if (val > 1.0 && val !== 100.0 && val !== 622.0) {
+                                info.price = val;
+                                break;
                             }
                         }
 
-                        // 4. Buscar en nodos de texto visibles
+                        // Si no se encontró por clase, buscar en los botones de operación
                         if (!info.price) {
-                            let walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-                            while (walker.nextNode()) {
-                                let t = walker.currentNode.textContent.trim();
-                                if (/^[0-9]{2,6}\\.[0-9]{2,5}$/.test(t.replace(/,/g, ''))) {
-                                    let val = parseFloat(t.replace(/,/g, ''));
-                                    if (val > 1.0 && val !== 100.0) {
+                            let buttons = searchRoot.querySelectorAll('button');
+                            for (let b of buttons) {
+                                // Excluir botones de recarga o de cabecera
+                                if (b.closest('header, nav, [class*="balance"], [class*="user"], [class*="profile"]')) continue;
+                                let m = b.innerText.match(/([0-9]{2,6}\\.[0-9]{2,5})/);
+                                if (m) {
+                                    let val = parseFloat(m[1]);
+                                    if (val > 1.0 && val !== 100.0 && val !== 622.0) {
                                         info.price = val;
                                         break;
                                     }
@@ -182,7 +185,20 @@ class RobustOlympReader:
                             }
                         }
 
-                        // 5. Payout
+                        // 3. Buscar en el eje de precios del gráfico (Y-axis tag)
+                        if (!info.price) {
+                            let tags = document.querySelectorAll('[class*="price-tag"], [class*="axis-label"], [class*="current-quote"]');
+                            for (let t of tags) {
+                                if (t.closest('header, nav, [class*="balance"]')) continue;
+                                let val = parseFloat(t.innerText.replace(/,/g, '').trim());
+                                if (val > 1.0 && val !== 100.0 && val !== 622.0) {
+                                    info.price = val;
+                                    break;
+                                }
+                            }
+                        }
+
+                        // 4. Payout
                         let payEl = document.querySelector('[data-test="deal-payout"], [class*="payout-value"]');
                         if (payEl) {
                             let pm = payEl.innerText.match(/([0-9]{2})/);
@@ -198,7 +214,7 @@ class RobustOlympReader:
                         self.current_payout = info["payout"]
 
                     detected_price = info.get("price", 0)
-                    if detected_price > 0:
+                    if detected_price > 0 and detected_price != 622.0:
                         self.register_tick(detected_price, now)
 
                     # Reporte cada 6 segundos en consola y log
@@ -211,9 +227,9 @@ class RobustOlympReader:
                             ema35 = calculate_ema_candles(closes, 35)
                             ema100 = calculate_ema_candles(closes, 100)
                             rsi7 = calculate_rsi_candles(closes, 7)
-                            log_msg(f"📊 {self.current_asset} | Precio: {self.current_price:.4f} | Velas 1M: {len(closes)} | EMA35: {ema35:.4f} | EMA100: {ema100:.4f} | RSI7: {rsi7:.1f}")
+                            log_msg(f"📊 {self.current_asset} | Precio Real: {self.current_price:.4f} | Velas 1M: {len(closes)} | EMA35: {ema35:.4f} | EMA100: {ema100:.4f} | RSI7: {rsi7:.1f}")
                         else:
-                            log_msg(f"🔍 Conectando con gráfico: {self.current_asset} (Precio: {detected_price}) | Ventana: '{info.get('title')}'")
+                            log_msg(f"🔍 Conectando con gráfico: {self.current_asset} (Precio detectado: {detected_price})")
 
                     # EVALUACIÓN SAGRADA AL SEGUNDO :50 (Manual Maestro)
                     if 49 <= now.second <= 52 and now.minute != self.last_alert_minute:
@@ -237,7 +253,7 @@ class RobustOlympReader:
 
                             log_msg(f"\n{'='*65}")
                             log_msg(f"🎯 EVALUACIÓN SEGUNDO :50 EN {self.current_asset}")
-                            log_msg(f"   Precio Actual: {self.current_price:.4f}")
+                            log_msg(f"   Precio Real: {self.current_price:.4f}")
                             log_msg(f"   Tendencia EMAs: {trend_str} (EMA35: {ema_35:.4f} | EMA100: {ema_100:.4f})")
                             log_msg(f"   RSI 7 (Velas 1M): {rsi_7:.1f} | Fibonacci: Techo={swing_high:.4f} Suelo={swing_low:.4f}")
 
