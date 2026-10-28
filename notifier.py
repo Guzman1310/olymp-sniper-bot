@@ -1,26 +1,37 @@
 import requests
-import os
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_IDS, MIN_PAYOUT_PERCENTAGE
 
 def send_telegram_alert(signal_type: str, asset: str, price: float, level_name: str, payout: int = 85):
     """
-    Envía una alerta formateada con filtro de rentabilidad a Rafael y Eduardo.
+    Envía una alerta con instrucción visual ULTRA-CLARA de la dirección exacta:
+    - 🟢 COMPRA (BOTÓN VERDE / ARRIBA)
+    - 🔴 VENTA (BOTÓN ROJO / ABAJO)
     """
     if payout < MIN_PAYOUT_PERCENTAGE:
         return
 
-    emoji = "🟢 COMPRA (ARRIBA)" if "COMPRA" in signal_type.upper() else "🔴 VENTA (ABAJO)"
+    is_buy = "COMPRA" in signal_type.upper()
     
+    if is_buy:
+        action_header = "🟢 ENTRADA: COMPRA (ARRIBA)"
+        button_instruction = "🟩 PRESIONAR BOTÓN VERDE (ARRIBA)"
+        direction_desc = "📈 Tendencia Alcista (Rebote sobre soporte / EMA 35)"
+    else:
+        action_header = "🔴 ENTRADA: VENTA (ABAJO)"
+        button_instruction = "🟥 PRESIONAR BOTÓN ROJO (ABAJO)"
+        direction_desc = "📉 Tendencia Bajista (Rechazo en resistencia / EMA 35)"
+
     text = (
         f"🎯 *¡ALERTA SNIPER EQUIPO!*\n\n"
         f"📊 *Activo:* `{asset}`\n"
-        f"💰 *Retorno:* `{payout}%` *(Filtro >= 85% Aprobado)*\n"
-        f"⚡ *Acción:* *{emoji}*\n"
+        f"💰 *Retorno:* `{payout}%`\n\n"
+        f"⚡ *DIRECCIÓN:* *{action_header}*\n"
+        f"👉 *ACCIÓN:* *{button_instruction}*\n\n"
         f"💵 *Importe:* `$1.00 USD`\n"
         f"⏱ *Temporalidad:* `1m (60 seg)`\n"
-        f"📍 *Zona Clave:* `{level_name}` ({price})\n"
-        f"⏳ *Gatillo:* Entrar en el segundo `:00` de la nueva vela.\n\n"
-        f"⚠️ _Filtro Anticascada verificado. No persigan si el precio ya se alejó._"
+        f"📍 *Zona Clave:* `{level_name}` ({price:.2f})\n"
+        f"ℹ️ *Estructura:* _{direction_desc}_\n\n"
+        f"⏳ *GATILLO:* Entrar al segundo exacto `:00` de la nueva vela."
     )
     
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -37,16 +48,11 @@ def send_telegram_alert(signal_type: str, asset: str, price: float, level_name: 
             print(f"[Error enviando a {chat_id}]: {e}")
 
 def trigger_sniper_signal(signal_type: str, asset: str, price: float, level_name: str, payout: int = 85):
-    """
-    Dispara la señal al equipo si cumple con el filtro de pago.
-    Compatible con entornos Cloud Linux (GitHub Actions / Render).
-    """
     if payout < MIN_PAYOUT_PERCENTAGE:
         return
         
     print(f"\n==========================================")
-    print(f"[DISPARO EQUIPO]: {signal_type} en {asset} ({payout}%) | Zona: {level_name} ({price})")
+    print(f"[DISPARO EQUIPO]: {signal_type} en {asset} ({payout}%) | Zona: {level_name} ({price:.2f})")
     print(f"==========================================\n")
     
-    # En la nube envía directamente a Telegram (Linux no tiene altavoces de PC)
     send_telegram_alert(signal_type, asset, price, level_name, payout)
