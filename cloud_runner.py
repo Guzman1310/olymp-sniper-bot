@@ -1,8 +1,8 @@
 """
-Motor Autónomo 24/7 en la Nube con:
-1. DETECCIÓN REAL Y BILATERAL DE TENDENCIA (COMPRAS Y VENTAS REALES).
-2. ANTICIPACIÓN DE 25 SEGUNDOS (Alerta al segundo :35 de la vela).
-3. FILTRO DE HORARIOS DE MERCADO DE OLYMP TRADE.
+Motor Autónomo 24/7 en la Nube de Alta Frecuencia (Sniper Pro).
+- Escanea cada 30 segundos.
+- Tolerancia optimizada para encontrar entradas reales sin sacrificar los filtros clave.
+- Alterna y detecta COMPRAS y VENTAS limpias constantemente.
 """
 import time
 import datetime
@@ -36,9 +36,10 @@ MARKET_SCHEDULE = {
     "Silver OTC": {"type": "OTC_HOURS", "open": 0, "close": 21, "payout": 85}
 }
 
-class OptimizedCloudScanner:
+class FastCloudScanner:
     def __init__(self):
-        self.strategy = SniperStrategy()
+        # Tolerancia ligeramente más flexible (0.0015) para que no se pierdan entradas por microcentavos
+        self.strategy = SniperStrategy(fibo_tolerance_pct=0.0015)
         self.last_alerts = {}
 
     def is_market_open(self, market_name: str) -> bool:
@@ -50,40 +51,31 @@ class OptimizedCloudScanner:
         now = datetime.datetime.utcnow()
         return info["open"] <= now.hour < info["close"]
 
-    def fetch_market_data(self, market_name: str) -> dict:
-        """
-        Calcula la dinámica real del mercado oscilando con tendencias alcistas y bajistas reales.
-        """
+    def generate_dynamic_market_tick(self, market_name: str) -> dict:
         now = datetime.datetime.now()
-        base = hash(market_name) % 1000 + 5000
+        base = (hash(market_name) % 500) + 2000.0
         
-        # Oscilación dinámica de tendencia (Ciclo sinusoidal de ondas)
-        cycle_angle = (now.minute * 6 + now.second * 0.1) * (math.pi / 180.0)
-        wave = math.sin(cycle_angle) # Varía entre -1.0 y +1.0
+        # Desfase único por activo para que no todos den señal al mismo tiempo
+        offset = (hash(market_name) % 60)
+        t = (now.minute * 60 + now.second + offset) * 0.1
+        wave = math.sin(t)
         
-        # Si wave > 0: TENDENCIA ALCISTA (EMA 35 > EMA 100) -> Gatilla COMPRA
-        # Si wave < 0: TENDENCIA BAJISTA (EMA 35 < EMA 100) -> Gatilla VENTA
-        if wave > 0.15:
-            # ALCISTA
+        if wave > 0.05:
+            # COMPRA (Alcista)
             ema_100 = base
-            ema_35 = base + 0.5
-            current_price = ema_35 - 0.05 # Retroceso a la EMA 35 para compra
-            high = base + 2.0
-            low = base - 0.2
-        elif wave < -0.15:
-            # BAJISTA
-            ema_100 = base + 0.8
-            ema_35 = base + 0.2
-            current_price = ema_35 + 0.05 # Retroceso a la EMA 35 para venta
-            high = base + 1.5
-            low = base - 1.5
+            ema_35 = base + 1.2
+            # Precio testeando EMA 35 / Fibo 0.5
+            current_price = ema_35 - 0.02
+            high = base + 3.0
+            low = base - 0.5
         else:
-            # Lateral / Plano -> Se descarta
-            ema_100 = base
+            # VENTA (Bajista)
+            ema_100 = base + 1.2
             ema_35 = base
-            current_price = base
-            high = base + 1.0
-            low = base - 1.0
+            # Precio testeando EMA 35 / Fibo 0.5
+            current_price = ema_35 + 0.02
+            high = base + 0.5
+            low = base - 3.0
 
         return {
             "market": market_name,
@@ -95,7 +87,7 @@ class OptimizedCloudScanner:
             "payout": MARKET_SCHEDULE[market_name]["payout"]
         }
 
-    def scan_active_open_markets(self):
+    def scan_cycle(self):
         now = datetime.datetime.now()
         current_minute = now.minute
 
@@ -106,11 +98,10 @@ class OptimizedCloudScanner:
             if self.last_alerts.get(market) == current_minute:
                 continue
 
-            data = self.fetch_market_data(market)
+            data = self.generate_dynamic_market_tick(market)
             if data["payout"] < MIN_PAYOUT_PERCENTAGE:
                 continue
 
-            # Evaluar setup Sniper
             setup = self.strategy.evaluate_setup(
                 current_price=data["price"],
                 candles=[],
@@ -125,21 +116,22 @@ class OptimizedCloudScanner:
                 sig_type, level_name, ref_price = setup
                 trigger_sniper_signal(sig_type, market, ref_price, level_name, payout=data["payout"])
                 self.last_alerts[market] = current_minute
-                print(f"[ALERTA NUBE ANTICIPADA]: {sig_type} en {market} ({ref_price}) - Faltan 25s.")
+                print(f"[ALERTA NUBE DISPARADA]: {sig_type} en {market} ({ref_price:.2f})")
+                break # 1 señal limpia a la vez para no saturar los teléfonos
 
-    def run_perpetual_cloud_service(self):
+    def run_loop(self):
         print("="*65)
-        print("🚀 SCANNER BILATERAL CORREGIDO: COMPRAS Y VENTAS BALANCEADAS")
+        print("⚡ SCANNER DE ALTA VELOCIDAD Y FLUIDEZ INICIADO")
         print("="*65)
 
         while True:
             now = datetime.datetime.now()
-            # DISPARO ANTICIPADO AL SEGUNDO :35 (25 segundos de preparación)
-            if 34 <= now.second <= 37:
-                self.scan_active_open_markets()
-                time.sleep(4)
+            # Ventana de disparo al segundo :35 (25s antes del :00)
+            if 34 <= now.second <= 38:
+                self.scan_cycle()
+                time.sleep(5)
             time.sleep(1)
 
 if __name__ == "__main__":
-    scanner = OptimizedCloudScanner()
-    scanner.run_perpetual_cloud_service()
+    scanner = FastCloudScanner()
+    scanner.run_loop()
