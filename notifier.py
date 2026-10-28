@@ -1,15 +1,12 @@
 import requests
-import pyttsx3
-import threading
+import os
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_IDS, MIN_PAYOUT_PERCENTAGE
 
 def send_telegram_alert(signal_type: str, asset: str, price: float, level_name: str, payout: int = 85):
     """
     Envía una alerta formateada con filtro de rentabilidad a Rafael y Eduardo.
     """
-    # Filtro estricto de pago del broker (>= 85%)
     if payout < MIN_PAYOUT_PERCENTAGE:
-        print(f"[FILTRADO]: {asset} tiene pago de {payout}%, menor al 85% requerido. Descartado.")
         return
 
     emoji = "🟢 COMPRA (ARRIBA)" if "COMPRA" in signal_type.upper() else "🔴 VENTA (ABAJO)"
@@ -39,29 +36,10 @@ def send_telegram_alert(signal_type: str, asset: str, price: float, level_name: 
         except Exception as e:
             print(f"[Error enviando a {chat_id}]: {e}")
 
-def speak_alert(text: str):
-    """
-    Reproduce la alerta por voz en español en la PC si está activa.
-    """
-    def _speak():
-        try:
-            engine = pyttsx3.init()
-            voices = engine.getProperty('voices')
-            for v in voices:
-                if "spanish" in v.name.lower() or "es" in v.id.lower() or "helena" in v.name.lower():
-                    engine.setProperty('voice', v.id)
-                    break
-            engine.setProperty('rate', 170)
-            engine.say(text)
-            engine.runAndWait()
-        except Exception as e:
-            pass
-            
-    threading.Thread(target=_speak, daemon=True).start()
-
 def trigger_sniper_signal(signal_type: str, asset: str, price: float, level_name: str, payout: int = 85):
     """
     Dispara la señal al equipo si cumple con el filtro de pago.
+    Compatible con entornos Cloud Linux (GitHub Actions / Render).
     """
     if payout < MIN_PAYOUT_PERCENTAGE:
         return
@@ -70,6 +48,5 @@ def trigger_sniper_signal(signal_type: str, asset: str, price: float, level_name
     print(f"[DISPARO EQUIPO]: {signal_type} en {asset} ({payout}%) | Zona: {level_name} ({price})")
     print(f"==========================================\n")
     
-    speech_text = f"Atento equipo. {signal_type} en {asset} al 85 por ciento. Entren al segundo cero."
-    speak_alert(speech_text)
+    # En la nube envía directamente a Telegram (Linux no tiene altavoces de PC)
     send_telegram_alert(signal_type, asset, price, level_name, payout)
