@@ -1,8 +1,8 @@
 """
-Lector y Escáner Real de Olymp Trade con Diagnóstico Visual y DOM Dump.
-- Toma captura de pantalla (debug_screen.png) para auditar la visual del gráfico.
-- Extrae el texto completo de la plataforma (dom_dump.txt) para localizar el precio exacto.
-- Calcula EMA 35, EMA 100, RSI 7 y Fibo de 1 Minuto según el Manual Maestro.
+Lector y Escáner Real de Olymp Trade (Full Precision SVG + DOM + 1M Audit).
+- Lee la etiqueta del precio real en el eje del gráfico (ej: 6221.0415 en SVG/DOM).
+- Alerta si la temporalidad del gráfico está en 5s en vez de 1m (Manual Maestro).
+- Calcula EMA 35, EMA 100, RSI 7 y Fibo de 1 Minuto estrictamente según el manual.
 """
 import time
 import datetime
@@ -30,7 +30,6 @@ except OSError:
 USER_DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "olymp_autotrader_bot", "browser_session")
 LOG_PATH = os.path.join(os.path.dirname(__file__), "sniper_activity.log")
 SCREENSHOT_PATH = os.path.join(os.path.dirname(__file__), "debug_screen.png")
-DOM_DUMP_PATH = os.path.join(os.path.dirname(__file__), "dom_dump.txt")
 
 def log_msg(msg: str):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -69,7 +68,7 @@ def calculate_rsi_candles(closes: List[float], period: int = 7) -> float:
     rs = avg_gain / avg_loss
     return 100.0 - (100.0 / (1.0 + rs))
 
-class DiagnosedOlympReader:
+class PreciseOlympReader:
     def __init__(self):
         self.strategy = SniperStrategy(fibo_tolerance_pct=0.0010)
         self.last_alert_minute = -1
@@ -81,7 +80,7 @@ class DiagnosedOlympReader:
         self.current_payout: int = 85
 
     def register_tick(self, price: float, now: datetime.datetime):
-        if price <= 0 or price == 622.0 or price == 1.0 or price == 100.0:
+        if price <= 100.0 or price == 622.0:
             return
         self.current_price = price
         minute = now.minute
@@ -107,7 +106,7 @@ class DiagnosedOlympReader:
 
     def start(self):
         log_msg("="*65)
-        log_msg("🎯 LECTOR SNIPER CON DIAGNÓSTICO VISUAL Y DOM ACTIVO")
+        log_msg("🎯 LECTOR SNIPER ULTRA-PRECISO (PRECIO EN EJE REAL + AUDITORÍA 1M)")
         log_msg("   Calcula EMA 35, EMA 100, RSI 7 y Fibo sobre Velas 1M")
         log_msg("   Equipo: Rafael Guzmán & Eduardo Rivera")
         log_msg("="*65)
@@ -136,24 +135,13 @@ class DiagnosedOlympReader:
             page.goto("https://olymptrade.com/platform", timeout=60000)
             time.sleep(6)
 
-            # 1. Guardar captura de pantalla de diagnóstico
             try:
                 page.screenshot(path=SCREENSHOT_PATH)
-                log_msg(f"[✓] Captura visual guardada en: {SCREENSHOT_PATH}")
-            except Exception as e:
-                log_msg(f"[!] Error guardando captura: {e}")
-
-            # 2. Guardar dump de texto del DOM
-            try:
-                dom_text = page.evaluate("() => document.body.innerText")
-                with open(DOM_DUMP_PATH, "w", encoding="utf-8") as f:
-                    f.write(dom_text)
-                log_msg(f"[✓] Dump del texto de la plataforma guardado en: {DOM_DUMP_PATH}")
-            except Exception as e:
-                log_msg(f"[!] Error guardando dump: {e}")
+            except Exception:
+                pass
 
             log_msg("[✓] Conexión establecida con la ventana de Olymp Trade.")
-            log_msg("[*] Iniciando escáner de cotizaciones en vivo...\n")
+            log_msg("[*] Monitoreando cotización en vivo...\n")
 
             last_status = 0
             last_screenshot = time.time()
@@ -162,47 +150,41 @@ class DiagnosedOlympReader:
                 try:
                     now = datetime.datetime.now()
 
-                    # Tomar captura cada 60 segundos para auditoría visual continua
-                    if time.time() - last_screenshot >= 60:
-                        last_screenshot = time.time()
-                        try:
-                            page.screenshot(path=SCREENSHOT_PATH)
-                        except Exception:
-                            pass
-
-                    # Extractor JS Completo
+                    # Extractor de Alta Precisión (Lectura de SVG y DOM sin límites)
                     info = page.evaluate("""() => {
-                        let info = { price: 0, asset: '', title: document.title, payout: 85, candidates: [] };
+                        let info = { price: 0, asset: '', payout: 85, timeframe: '' };
                         
-                        // 1. Extraer nombre de activo
+                        // 1. Nombre del activo
                         let assetEl = document.querySelector('[data-test*="asset"], [class*="asset-name"], [class*="asset-select"], [class*="pair-name"]');
                         if (assetEl) {
                             info.asset = assetEl.innerText.trim();
                         }
                         
-                        // 2. Extraer todos los números candidatos que NO sean saldo ni cabecera
+                        // 2. Temporalidad en pantalla (5seg vs 1m)
+                        let allTexts = Array.from(document.querySelectorAll('*')).map(e => e.textContent || '');
+                        for (let t of allTexts) {
+                            if (t === '5seg' || t === '5s') info.timeframe = '5s';
+                            if (t === '1m' || t === '1min') info.timeframe = '1m';
+                        }
+
+                        // 3. Buscar el precio real en la etiqueta negra del eje del gráfico (ej: 6221.0415)
                         let allEls = Array.from(document.querySelectorAll('*'));
                         for (let el of allEls) {
-                            if (el.children.length === 0 && el.innerText) {
-                                let t = el.innerText.trim();
-                                if (/^[0-9]{2,6}\\.[0-9]{2,5}$/.test(t.replace(/,/g, ''))) {
-                                    let val = parseFloat(t.replace(/,/g, ''));
-                                    // Ignorar saldo de cuenta conocido y porcentajes
-                                    if (val > 1.0 && val !== 100.0 && val !== 622.0) {
-                                        // Verificar si está en la zona de trading o gráfico
-                                        let isHeader = el.closest('header, nav, [class*="balance"], [class*="user"], [class*="profile"]');
-                                        if (!isHeader) {
-                                            info.candidates.push({ val: val, tag: el.tagName, cls: el.className });
-                                            if (!info.price) {
-                                                info.price = val;
-                                            }
-                                        }
-                                    }
+                            if (el.closest('header, nav, [class*="balance"]')) continue;
+                            
+                            let text = (el.textContent || '').trim();
+                            // El precio de índices suele tener entre 4 y 6 cifras enteras y 2 a 4 decimales
+                            let m = text.match(/^([0-9]{3,6}\\.[0-9]{2,5})$/);
+                            if (m) {
+                                let val = parseFloat(m[1]);
+                                if (val > 100.0 && val !== 622.0) {
+                                    info.price = val;
+                                    break;
                                 }
                             }
                         }
 
-                        // 3. Payout
+                        // 4. Payout
                         let payEl = document.querySelector('[data-test="deal-payout"], [class*="payout-value"]');
                         if (payEl) {
                             let pm = payEl.innerText.match(/([0-9]{2})/);
@@ -218,7 +200,7 @@ class DiagnosedOlympReader:
                         self.current_payout = info["payout"]
 
                     detected_price = info.get("price", 0)
-                    if detected_price > 0 and detected_price != 622.0:
+                    if detected_price > 100.0:
                         self.register_tick(detected_price, now)
 
                     # Reporte cada 6 segundos en consola y log
@@ -227,13 +209,17 @@ class DiagnosedOlympReader:
                         all_candles = self.candles + ([self.current_candle] if self.current_candle else [])
                         closes = [c["close"] for c in all_candles if "close" in c]
                         
-                        if closes:
+                        tf_warning = ""
+                        if info.get("timeframe") == "5s":
+                            tf_warning = " ⚠️ AVISO: Gráfico en 5s. Cambiar a 1M."
+
+                        if closes and self.current_price > 0:
                             ema35 = calculate_ema_candles(closes, 35)
                             ema100 = calculate_ema_candles(closes, 100)
                             rsi7 = calculate_rsi_candles(closes, 7)
-                            log_msg(f"📊 {self.current_asset} | Precio Real: {self.current_price:.4f} | Velas 1M: {len(closes)} | EMA35: {ema35:.4f} | EMA100: {ema100:.4f} | RSI7: {rsi7:.1f}")
+                            log_msg(f"📊 {self.current_asset} | Precio: {self.current_price:.4f} | Velas 1M: {len(closes)} | EMA35: {ema35:.4f} | EMA100: {ema100:.4f} | RSI7: {rsi7:.1f}{tf_warning}")
                         else:
-                            log_msg(f"🔍 Conectando con gráfico: {self.current_asset} (Precio detectado: {detected_price}) | Candidatos: {len(info.get('candidates', []))}")
+                            log_msg(f"🔍 Conectando con gráfico: {self.current_asset} (Precio detectado: {detected_price}){tf_warning}")
 
                     # EVALUACIÓN SAGRADA AL SEGUNDO :50 (Manual Maestro)
                     if 49 <= now.second <= 52 and now.minute != self.last_alert_minute:
@@ -294,5 +280,5 @@ class DiagnosedOlympReader:
                     time.sleep(1)
 
 if __name__ == "__main__":
-    reader = DiagnosedOlympReader()
+    reader = PreciseOlympReader()
     reader.start()
